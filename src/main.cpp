@@ -1,9 +1,11 @@
+/* PROJECT https://github.com/ModMiniMan/nRF24-Esk8-Remote/ */
+#include <Arduino.h>
 #include <U8g2lib.h>
 #include <Wire.h>
 #include <SPI.h>
 #include <EEPROM.h>
-#include "RF24.h"
 #include "VescUart.h"
+#include "emotes.h"
 
 //#define DEBUG
 
@@ -17,23 +19,6 @@
 // Defining the type of display used (128x32)
 U8G2_SSD1306_128X32_UNIVISION_1_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE); // Right Handed Display
 //U8G2_SSD1306_128X32_UNIVISION_1_HW_I2C u8g2(U8G2_R2, U8X8_PIN_NONE); // Left Handed Display
-
-static unsigned char logo_bits[] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x7e, 0x00, 0x80, 0x3c, 0x01, 0xe0, 0x00, 0x07, 0x70, 0x18, 0x0e, 0x30, 0x18, 0x0c, 0x98, 0x99, 0x19, 0x80, 0xff, 0x01, 0x04, 0xc3, 0x20, 0x0c, 0x99, 0x30, 0xec, 0xa5, 0x37, 0xec, 0xa5, 0x37, 0x0c, 0x99, 0x30, 0x04, 0xc3, 0x20, 0x80, 0xff, 0x01, 0x98, 0x99, 0x19, 0x30, 0x18, 0x0c, 0x70, 0x18, 0x0e, 0xe0, 0x00, 0x07, 0x80, 0x3c, 0x01, 0x00, 0x7e, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
-
-static unsigned char signal_transmitting_bits[] = {
-  0x18, 0x00, 0x0c, 0x00, 0xc6, 0x00, 0x66, 0x00, 0x23, 0x06, 0x33, 0x0f,
-  0x33, 0x0f, 0x23, 0x06, 0x66, 0x00, 0xc6, 0x00, 0x0c, 0x00, 0x18, 0x00
-};
-
-static unsigned char signal_connected_bits[] = {
-  0x18, 0x00, 0x0c, 0x00, 0xc6, 0x00, 0x66, 0x00, 0x23, 0x06, 0x33, 0x09,
-  0x33, 0x09, 0x23, 0x06, 0x66, 0x00, 0xc6, 0x00, 0x0c, 0x00, 0x18, 0x00
-};
-
-static unsigned char signal_noconnection_bits[] = {
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x06, 0x00, 0x09,
-  0x00, 0x09, 0x00, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
-};
 
 // Defining struct to hold UART data.
 struct vescValues {
@@ -139,9 +124,6 @@ float wheelPulley;
 float wheelDiameter;
 String selectedDeck;
 
-// Instantiating RF24 object for NRF24 communication
-RF24 radio(9, 10);
-
 // Defining variables for Settings menu
 bool changeSettings = false;
 bool changeSelectedSetting = false;
@@ -150,6 +132,32 @@ bool settingsLoopFlag = false;
 bool settingsChangeFlag = false;
 bool settingsChangeValueFlag = false;
 
+void  setup();
+void  loop();
+void  controlSettingsMenu();
+void  drawSettingNumber();
+void  drawSettingsMenu();
+void  drawString(String text, uint8_t lenght, uint8_t x, uint8_t y, const uint8_t  *font);
+void  setDefaultEEPROMSettings();
+void  loadEEPROMSettings();
+void  updateEEPROMSettings();
+void  calculateRatios();
+int   getSettingValue(int index);
+void  setSettingValue(int index, int value);
+bool  inRange(int val, int minimum, int maximum);
+boolean DmActive();
+boolean ModeActive();
+void transmitToVesc();
+void calculateThrottlePosition();
+int batteryLevel();
+float batteryVoltage();
+void updateMainDisplay();
+void drawStartScreen();
+void drawTitleScreen(String title);
+void drawPage();
+void drawThrottle();
+void drawSignal();
+void drawBatteryLevel();
 
 void setup() {
   
@@ -184,11 +192,11 @@ void setup() {
   }
 
   // Start radio communication
-  radio.begin();
-  radio.setPALevel(RF24_PA_MAX);
-  radio.enableAckPayload();
-  radio.enableDynamicPayloads();
-  radio.openWritingPipe(pipe);
+  // radio.begin();
+  // radio.setPALevel(RF24_PA_MAX);
+  // radio.enableAckPayload();
+  // radio.enableDynamicPayloads();
+  // radio.openWritingPipe(pipe);
 
   #ifdef DEBUG
     printf_begin();
@@ -353,7 +361,7 @@ void drawSettingsMenu() {
   }
 }
 
-void drawString(String text, uint8_t lenght, uint8_t x, uint8_t y, const uint8_t  *font){
+void drawString(String text, uint8_t lenght, uint8_t x, uint8_t y, const uint8_t  *font) {
   
   static char textBuffer[20];
   
@@ -401,7 +409,6 @@ void updateEEPROMSettings() {
   EEPROM.put(0, remoteSettings);
   calculateRatios();
 }
-
 
 // Update values used to calculate speed and distance travelled.
 void calculateRatios() {
@@ -465,12 +472,14 @@ void transmitToVesc() {
 
     boolean sendSuccess = false;
     // Transmit the speed value (0-255).
-    sendSuccess = radio.write(&throttle, sizeof(throttle));
+    ///TODO: NeW signal method
+    //sendSuccess = radio.write(&throttle, sizeof(throttle));
 
     // Listen for an acknowledgement reponse (return of VESC data).
-    while (radio.isAckPayloadAvailable()) {
-      radio.read(&data, sizeof(data));
-    }
+    ///TODO: new while loop
+    // while (radio.isAckPayloadAvailable()) {
+    //   radio.read(&data, sizeof(data));
+    // }
 
     if (sendSuccess == true)
     {
